@@ -122,7 +122,7 @@ def pipeline(  # noqa: D417
 
         model (`str` or [`OVBaseModel`] or [`IPEXModel`], *optional*):
             The model that will be used by the pipeline to make predictions. This can be a model identifier or an
-            actual instance of a OpenVINO or IPEX model inheriting from [`OVBaseModel`] or [`IPEXModel`].
+            actual instance of an OpenVINO or IPEX model inheriting from [`OVBaseModel`] or [`IPEXModel`].
 
             If not provided, the default for the `task` will be loaded.
         config (`str` or [`PretrainedConfig`], *optional*):

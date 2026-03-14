@@ -1846,7 +1846,7 @@ class BaseVLMOpenVINOConfig(OnnxConfig):
         behavior: Union[str, VLMConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
 
         Args:
             behavior ([`ConfigBehavior`]):
@@ -2002,7 +2002,7 @@ class LlavaNextVideoOpenVINOConfig(LlavaOpenVINOConfig):
         behavior: Union[str, LlavaNextVideoConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
 
         Args:
             behavior ([`ConfigBehavior`]):
@@ -2108,7 +2108,7 @@ class InternVLChatOpenVINOConfig(BaseVLMOpenVINOConfig):
         behavior: Union[str, VLMConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
 
         Args:
             behavior ([`ConfigBehavior`]):
@@ -2232,7 +2232,7 @@ class LlavaQwen2OpenVINOConfig(BaseVLMOpenVINOConfig):
         behavior: Union[str, VLMConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
         Args:
             behavior ([`ConfigBehavior`]):
                 The behavior to use for the new instance.
@@ -2924,7 +2924,7 @@ class MiniCPMVOpenVINOConfig(BaseVLMOpenVINOConfig):
         behavior: Union[str, MiniCPMVConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
         Args:
             behavior ([`ConfigBehavior`]):
                 The behavior to use for the new instance.
@@ -3105,7 +3105,7 @@ class Phi3VisionOpenVINOConfig(BaseVLMOpenVINOConfig):
         behavior: Union[str, Phi3VisionConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
         Args:
             behavior ([`ConfigBehavior`]):
                 The behavior to use for the new instance.
@@ -3390,7 +3390,7 @@ class Phi4MMOpenVINOConfig(BaseVLMOpenVINOConfig):
         behavior: Union[str, Phi4MMConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
         Args:
             behavior ([`ConfigBehavior`]):
                 The behavior to use for the new instance.
@@ -3703,7 +3703,7 @@ class Qwen2VLOpenVINOConfig(BaseVLMOpenVINOConfig):
         behavior: Union[str, QwenVLConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
         Args:
             behavior ([`ConfigBehavior`]):
                 The behavior to use for the new instance.
@@ -3839,7 +3839,7 @@ class Qwen3VLOpenVINOConfig(Qwen2VLOpenVINOConfig):
         behavior: Union[str, QwenVLConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
         Args:
             behavior ([`ConfigBehavior`]):
                 The behavior to use for the new instance.
@@ -4149,7 +4149,7 @@ class Gemma3OpenVINOConfig(BaseVLMOpenVINOConfig):
         behavior: Union[str, VLMConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
 
         Args:
             behavior ([`ConfigBehavior`]):
@@ -4485,7 +4485,7 @@ class SpeechT5OpenVINOConfig(SpeechT5OnnxConfig):
         behavior: Union[str, SpeechT5ConfigBehavior],
     ):
         """
-        Creates a config for different behaviour.
+        Creates a config for different behavior.
         """
         if isinstance(behavior, str) and not isinstance(behavior, SpeechT5ConfigBehavior):
             behavior = SpeechT5ConfigBehavior(behavior)
