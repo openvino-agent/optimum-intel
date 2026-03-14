@@ -555,7 +555,7 @@ def _mistral_update_causal_mask(
             if is_padding_right:
                 raise ValueError(
                     "You are attempting to perform batched generation with padding_side='right'"
-                    " this may lead to unexpected behaviour for Flash Attention version of Mistral. Make sure to "
+                    " this may lead to unexpected behavior for Flash Attention version of Mistral. Make sure to "
                     " call `tokenizer.padding_side  = 'left'` before tokenizing the input. "
                 )
         if attention_mask is not None and 0.0 in attention_mask:
@@ -1386,7 +1386,7 @@ def phi3_442_forward(
         if is_padding_right:
             raise ValueError(
                 "You are attempting to perform batched generation with padding_side='right'"
-                " this may lead to unexpected behaviour for Flash Attention version of Phi3. Make sure to "
+                " this may lead to unexpected behavior for Flash Attention version of Phi3. Make sure to "
                 " call `tokenizer.padding_side  = 'left'` before tokenizing the input. "
             )
 
@@ -1529,7 +1529,7 @@ class Phi3ModelPatcher(OVDecoderModelPatcher):
     def __enter__(self):
         super().__enter__()
 
-        # currently, long RoPE can not be traced for long context support, disable it for avoid potential accuracy issues
+        # currently, long RoPE can not be traced for long context support, disable it to avoid potential accuracy issues
         if self._model.config.max_position_embeddings != getattr(
             self._model.config, "original_max_position_embeddings", self._model.config.max_position_embeddings
         ):
@@ -2182,7 +2182,7 @@ class DBRXModelPatcher(OVDecoderModelPatcher):
     def __enter__(self):
         super().__enter__()
         # dbrx has some accuracy issues with bf16 with transformers >= 4.40
-        # fill causal mask in slightly different way for avoid overflow on some platforms
+        # fill causal mask in slightly different way to avoid overflow on some platforms
         self._model.transformer._orig_update_causal_mask = self._model.transformer._update_causal_mask
         self._model.transformer._update_causal_mask = types.MethodType(
             _dbrx_update_causal_mask, self._model.transformer
