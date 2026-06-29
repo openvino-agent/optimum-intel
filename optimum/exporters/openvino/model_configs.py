@@ -3600,6 +3600,10 @@ class FunASROpenVINOConfig(AudioToTextOpenVINOConfig):
             common_inputs["decoder_input_ids"] = {0: "batch_size", 1: "decoder_sequence_length"}
             if self.use_past_in_inputs:
                 self.add_past_key_values(common_inputs, direction="inputs")
+                decoder_attention_mask_dim = "past_decoder_sequence_length + decoder_sequence_length"
+            else:
+                decoder_attention_mask_dim = "decoder_sequence_length"
+            common_inputs["decoder_attention_mask"] = {0: "batch_size", 1: decoder_attention_mask_dim}
         return common_inputs
 
     def add_past_key_values(self, inputs_or_outputs: Dict[str, Dict[int, str]], direction: str):

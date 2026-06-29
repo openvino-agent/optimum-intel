@@ -608,13 +608,26 @@ class FunASRTest(unittest.TestCase):
         waveform, sampling_rate = sf.read(wav_path, dtype="float32")
         ov_inputs = ov_model.preprocess_input(waveform, sampling_rate, language="中文")
         self.assertEqual(ov_inputs["input_features"].shape, input_features.shape)
+        self.assertTrue(
+            torch.equal(ov_inputs["attention_mask"], torch.ones(input_features.shape[:2], dtype=torch.long))
+        )
         self.assertTrue(torch.equal(ov_inputs["decoder_input_ids"], decoder_input_ids))
+        self.assertTrue(torch.equal(ov_inputs["decoder_attention_mask"], torch.ones_like(decoder_input_ids)))
+
+        prepared = ov_model.prepare_inputs_for_generation(
+            ov_inputs["decoder_input_ids"],
+            attention_mask=ov_inputs["attention_mask"],
+            decoder_attention_mask=ov_inputs["decoder_attention_mask"],
+        )
+        self.assertTrue(torch.equal(prepared["decoder_attention_mask"], ov_inputs["decoder_attention_mask"]))
 
         # Compare transcriptions using the exact inputs funasr produced (so both sides see the same
         # dithered features), which keeps the text equality check deterministic.
         ov_generated_ids = ov_model.generate(
             input_features=input_features,
+            attention_mask=torch.ones(input_features.shape[:2], dtype=torch.long),
             decoder_input_ids=decoder_input_ids,
+            decoder_attention_mask=torch.ones_like(decoder_input_ids),
             **gen_kwargs,
         )
         if hasattr(ov_generated_ids, "sequences"):

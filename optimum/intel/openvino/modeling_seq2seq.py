@@ -1421,7 +1421,8 @@ class OVModelForSpeechSeq2Seq(OVModelForSeq2SeqLM):
             itn: Whether to apply inverse text normalization.
 
         Returns:
-            Dictionary with `input_features` (B, T, 560) and `decoder_input_ids` (B, L).
+            Dictionary with `input_features` (B, T, 560), `attention_mask` (B, T),
+            `decoder_input_ids` (B, L), and `decoder_attention_mask` (B, L).
         """
         import torchaudio
         import torchaudio.compliance.kaldi as kaldi
@@ -1484,8 +1485,10 @@ class OVModelForSpeechSeq2Seq(OVModelForSeq2SeqLM):
         max_frames = max(num_frames)
         feature_size = feats[0].shape[-1]
         input_features = torch.zeros(len(feats), max_frames, feature_size, dtype=torch.float32)
+        attention_mask = torch.zeros(len(feats), max_frames, dtype=torch.long)
         for i, f in enumerate(feats):
             input_features[i, : f.shape[0]] = f
+            attention_mask[i, : f.shape[0]] = 1
 
         # Build the chat prompt and tokenize it with the exported OpenVINO tokenizer IR.
         asr_prompt = f"语音转写成{language}：" if itn else f"语音转写成{language}，不进行文本规整："
@@ -1499,11 +1502,23 @@ class OVModelForSpeechSeq2Seq(OVModelForSeq2SeqLM):
             ids = before_ids + [audio_token_id] * _num_audio_tokens(nf) + after_ids
             prompt_ids.append(torch.tensor(ids, dtype=torch.long))
         max_len = max(t.shape[0] for t in prompt_ids)
-        decoder_input_ids = torch.zeros(len(prompt_ids), max_len, dtype=torch.long)
+        pad_token_id = getattr(self.config, "pad_token_id", None)
+        if pad_token_id is None:
+            pad_token_id = getattr(self.config, "eos_token_id", audio_token_id)
+        if isinstance(pad_token_id, (list, tuple)):
+            pad_token_id = pad_token_id[0]
+        decoder_input_ids = torch.full((len(prompt_ids), max_len), int(pad_token_id), dtype=torch.long)
+        decoder_attention_mask = torch.zeros(len(prompt_ids), max_len, dtype=torch.long)
         for i, t in enumerate(prompt_ids):
             decoder_input_ids[i, : t.shape[0]] = t
+            decoder_attention_mask[i, : t.shape[0]] = 1
 
-        return {"input_features": input_features, "decoder_input_ids": decoder_input_ids}
+        return {
+            "input_features": input_features,
+            "attention_mask": attention_mask,
+            "decoder_input_ids": decoder_input_ids,
+            "decoder_attention_mask": decoder_attention_mask,
+        }
 
     def _funasr_tokenizer_encode(self, text: str) -> List[int]:
         """Encode text to token ids using the exported OpenVINO tokenizer IR."""
@@ -1576,6 +1591,7 @@ class OVModelForSpeechSeq2Seq(OVModelForSeq2SeqLM):
             "head_mask": head_mask,
             "decoder_head_mask": decoder_head_mask,
             "cross_attn_head_mask": cross_attn_head_mask,
+            "decoder_attention_mask": decoder_attention_mask,
             "use_cache": use_cache,
         }
 
