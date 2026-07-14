@@ -45,7 +45,10 @@ class OVASRTest(unittest.TestCase):
     @parameterized.expand(SUPPORTED_ARCHITECTURES)
     @pytest.mark.skipif(
         is_transformers_version("!=", "4.57.6"),
-        reason="requires transformers==4.57.6.",
+        reason=(
+            "Qwen3-ASR remote code is pinned to transformers==4.57.6, and this shared parity test runs "
+            "both Qwen3-ASR and FunASR in the version-pinned remote-code CI job."
+        ),
     )
     def test_compare_to_transformers(self, model_arch):
         model_id = MODEL_NAMES[model_arch]
@@ -100,6 +103,7 @@ class OVASRTest(unittest.TestCase):
 
         model_id = MODEL_NAMES["fun_asr"]
         buf = io.StringIO()
+        # FunASR writes checkpoint progress to both streams; keep the parity-test output readable.
         with redirect_stdout(buf), redirect_stderr(buf):
             funasr_model = FunASRAutoModel(
                 model=model_id, hub="hf", trust_remote_code=True, device="cpu", disable_update=True
@@ -123,6 +127,7 @@ class OVASRTest(unittest.TestCase):
         gen_kwargs = {"max_new_tokens": 64}
 
         core.inference_prepare = _capture
+        # FunASR also writes inference progress to both streams.
         with redirect_stdout(buf), redirect_stderr(buf):
             pt_result = funasr_model.generate(
                 input=[audio_tensor],
