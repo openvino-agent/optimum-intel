@@ -11879,27 +11879,119 @@ class _Qwen3TTSCodecPatcherMixin:
     with ``ceil`` over a Python-int length, and from small sliding-window transformers whose
     masks are built with ``vmap``. Neither traces into a length-agnostic graph, so:
 
-    * ``_get_extra_padding_for_conv1d`` is forced to 0. This is exact as long as the waveform
-      length is a multiple of the codec's total stride (1920 samples = one 12.5 Hz frame),
-      which both call sites guarantee: the decoder only ever sees whole frames, and the
-      runtime pads the encoder's waveform up to a frame boundary. Same rationale as
-      :class:`Qwen3OmniMoeCode2WavPatcher`.
+    * ``_get_extra_padding_for_conv1d`` is forced to 0 for the decoder only. The decoder only
+      ever receives whole-frame inputs (multiples of 1920 samples), so zero extra padding is
+      exact. The encoder is NOT patched here because it receives arbitrary-length ref audio;
+      letting it trace its natural per-layer padding matches the compatible exporter behaviour.
     * the vmap-free mask builders are registered for the codec transformers, mirroring
       :class:`OVDecoderModelPatcher`.
     """
+
+    # Subclasses set this to False to skip zeroing _get_extra_padding_for_conv1d.
+    _patch_causal_conv_padding: bool = True
 
     def _causal_conv_class(self):
         """Return the causal-convolution class whose extra padding must be neutralized."""
         raise NotImplementedError
 
     def _enter_codec_patches(self):
-        conv_cls = self._causal_conv_class()
-        self._orig_get_extra_padding = conv_cls._get_extra_padding_for_conv1d
-        conv_cls._get_extra_padding_for_conv1d = lambda self, hidden_state: 0
-        self._patched_conv_cls = conv_cls
+        self._patched_conv_cls = None
+        if self._patch_causal_conv_padding:
+            conv_cls = self._causal_conv_class()
+            self._orig_get_extra_padding = conv_cls._get_extra_padding_for_conv1d
+            conv_cls._get_extra_padding_for_conv1d = lambda self, hidden_state: 0
+            self._patched_conv_cls = conv_cls
 
         ALL_MASK_ATTENTION_FUNCTIONS.register("eager", eager_mask_without_vmap)
         ALL_MASK_ATTENTION_FUNCTIONS.register("sdpa", eager_mask_without_vmap)
+
+        # The codec's encoder_transformer calls create_causal_mask / create_sliding_window_causal_mask
+        # before the attention dispatch. The stock implementations use data-dependent shapes that
+        # torch.jit.trace bakes as constants, producing wrong masks at inference for other lengths.
+        # Replace with static triu/tril equivalents, matching Qwen3TTSSpeechTokenizerModelPatcher.
+        self._masking_utils = None
+        self._orig_causal_mask = None
+        self._orig_sliding_window_causal_mask = None
+        self._qwen_tokenizer_module = None
+        self._orig_qwen_causal_mask = None
+        self._orig_qwen_sliding_window_causal_mask = None
+        self._dynamic_layer_cls = None
+        self._orig_dynamic_layer_update = None
+
+        try:
+            import transformers.masking_utils as _masking_utils
+
+            self._masking_utils = _masking_utils
+            self._orig_causal_mask = getattr(_masking_utils, "create_causal_mask", None)
+            self._orig_sliding_window_causal_mask = getattr(_masking_utils, "create_sliding_window_causal_mask", None)
+
+            def _simple_causal_mask(**kwargs):
+                input_embeds = kwargs["input_embeds"]
+                batch_size, seq_len = input_embeds.shape[0], input_embeds.shape[1]
+                dtype = input_embeds.dtype
+                mask = torch.triu(
+                    torch.full((seq_len, seq_len), torch.finfo(dtype).min, dtype=dtype, device=input_embeds.device),
+                    diagonal=1,
+                )
+                return mask.unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
+
+            def _simple_sliding_window_causal_mask(**kwargs):
+                config = kwargs["config"]
+                input_embeds = kwargs["input_embeds"]
+                batch_size, seq_len = input_embeds.shape[0], input_embeds.shape[1]
+                dtype = input_embeds.dtype
+                window_size = getattr(config, "sliding_window", None) or 72
+                mask = torch.triu(
+                    torch.full((seq_len, seq_len), torch.finfo(dtype).min, dtype=dtype, device=input_embeds.device),
+                    diagonal=1,
+                )
+                sliding_mask = torch.tril(
+                    torch.full((seq_len, seq_len), torch.finfo(dtype).min, dtype=dtype, device=input_embeds.device),
+                    diagonal=-window_size,
+                )
+                return (mask + sliding_mask).unsqueeze(0).unsqueeze(0).expand(batch_size, 1, -1, -1)
+
+            if self._orig_causal_mask is not None:
+                _masking_utils.create_causal_mask = _simple_causal_mask
+            if self._orig_sliding_window_causal_mask is not None:
+                _masking_utils.create_sliding_window_causal_mask = _simple_sliding_window_causal_mask
+        except Exception:
+            self._masking_utils = None
+
+        try:
+            import qwen_tts.core.tokenizer_12hz.modeling_qwen3_tts_tokenizer_v2 as _qwen_modeling
+
+            self._qwen_tokenizer_module = _qwen_modeling
+            self._orig_qwen_causal_mask = getattr(_qwen_modeling, "create_causal_mask", None)
+            self._orig_qwen_sliding_window_causal_mask = getattr(_qwen_modeling, "create_sliding_window_causal_mask", None)
+            if self._orig_qwen_causal_mask is not None and self._masking_utils is not None:
+                _qwen_modeling.create_causal_mask = self._masking_utils.create_causal_mask
+            if self._orig_qwen_sliding_window_causal_mask is not None and self._masking_utils is not None:
+                _qwen_modeling.create_sliding_window_causal_mask = self._masking_utils.create_sliding_window_causal_mask
+        except Exception:
+            self._qwen_tokenizer_module = None
+
+        try:
+            from transformers.cache_utils import DynamicLayer
+
+            self._dynamic_layer_cls = DynamicLayer
+            self._orig_dynamic_layer_update = DynamicLayer.update
+
+            def _dynamic_layer_update(self, key_states, value_states, cache_kwargs=None):
+                if self.keys is None:
+                    self.keys = key_states
+                    self.values = value_states
+                    self.device = key_states.device
+                    self.dtype = key_states.dtype
+                    self.is_initialized = True
+                else:
+                    self.keys = torch.cat([self.keys, key_states], dim=-2)
+                    self.values = torch.cat([self.values, value_states], dim=-2)
+                return self.keys, self.values
+
+            DynamicLayer.update = _dynamic_layer_update
+        except Exception:
+            self._dynamic_layer_cls = None
 
     def _exit_codec_patches(self):
         if getattr(self, "_patched_conv_cls", None) is not None:
@@ -11908,6 +12000,21 @@ class _Qwen3TTSCodecPatcherMixin:
 
         ALL_MASK_ATTENTION_FUNCTIONS.register("sdpa", sdpa_mask)
         ALL_MASK_ATTENTION_FUNCTIONS.register("eager", eager_mask)
+
+        if getattr(self, "_masking_utils", None) is not None:
+            if getattr(self, "_orig_causal_mask", None) is not None:
+                self._masking_utils.create_causal_mask = self._orig_causal_mask
+            if getattr(self, "_orig_sliding_window_causal_mask", None) is not None:
+                self._masking_utils.create_sliding_window_causal_mask = self._orig_sliding_window_causal_mask
+
+        if getattr(self, "_qwen_tokenizer_module", None) is not None:
+            if getattr(self, "_orig_qwen_causal_mask", None) is not None:
+                self._qwen_tokenizer_module.create_causal_mask = self._orig_qwen_causal_mask
+            if getattr(self, "_orig_qwen_sliding_window_causal_mask", None) is not None:
+                self._qwen_tokenizer_module.create_sliding_window_causal_mask = self._orig_qwen_sliding_window_causal_mask
+
+        if getattr(self, "_dynamic_layer_cls", None) is not None and getattr(self, "_orig_dynamic_layer_update", None) is not None:
+            self._dynamic_layer_cls.update = self._orig_dynamic_layer_update
 
 
 class Qwen3TTSCodecEncoderPatcher(_Qwen3TTSCodecPatcherMixin, ModelPatcher):
@@ -11921,19 +12028,19 @@ class Qwen3TTSCodecEncoderPatcher(_Qwen3TTSCodecPatcherMixin, ModelPatcher):
     Based on: https://github.com/huggingface/transformers/blob/v4.57.3/src/transformers/models/mimi/modeling_mimi.py#L1442
     """
 
+    # Dummy input is 8*1920 samples (multiple of codec stride), so _get_extra_padding_for_conv1d
+    # naturally returns 0 at every layer — correct for single-shot encoding of any input length.
+    _patch_causal_conv_padding = False
+
     def __init__(self, config, model, model_kwargs=None):
         super().__init__(config, model, model_kwargs)
         encoder = self._model.encoder
         num_quantizers = self._model.num_quantizers
 
         def patched_forward(input_values):
-            embeddings = encoder.encoder(input_values)
-            encoder_outputs = encoder.encoder_transformer(embeddings.transpose(1, 2))
-            embeddings = encoder_outputs[0].transpose(1, 2)
-            embeddings = encoder.downsample(embeddings)
-            # [num_quantizers, B, T] -> [B, num_quantizers, T], matching MimiModel.encode.
-            codes = encoder.quantizer.encode(embeddings, num_quantizers)
-            return {"audio_codes": codes.transpose(0, 1)}
+            # Call encode() directly, matching the compatible exporter's approach.
+            encoded = encoder.encode(input_values=input_values, return_dict=True)
+            return {"audio_codes": encoded.audio_codes[:, :num_quantizers]}
 
         self.patched_forward = patched_forward
 
